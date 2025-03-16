@@ -90,12 +90,15 @@
             Size: <span id="sizeDisplay">30</span>
         </div>
         <div id="tutorial">
-            Use Arrow Keys or WASD to move
+            Use Arrow Keys or WASD to move<br>
+            Press M to mute/unmute
         </div>
     </div>
-    <script src="js/game.js"></script>
-    <script src="js/player.js"></script>
-    <script src="js/creature.js"></script>
+    <!-- Load scripts in the correct order -->
+    <script src="js/sound.js"></script>
     <script src="js/particles.js"></script>
+    <script src="js/creature.js"></script>
+    <script src="js/player.js"></script>
+    <script src="js/game.js"></script>
 </body>
 </html> 
