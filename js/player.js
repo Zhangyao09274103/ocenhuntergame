@@ -2,10 +2,9 @@ class Player {
     constructor(x, y, level) {
         this.x = x;
         this.y = y;
-        this.level = level;
-        this.size = 30 + (level - 1) * 10;
+        this.size = 20 + (level - 1) * 5;
         this.speed = 5;
-        this.color = '#4FC3F7';
+        this.level = level;
         this.facingRight = true;
         
         // Animation properties
@@ -13,15 +12,50 @@ class Player {
         this.tailSpeed = 0.1;
         this.finAngle = 0;
         this.finSpeed = 0.05;
-        this.bubbleTime = 0;
-        this.isMoving = false;
+        this.scaleGlow = 0;
+        this.glowDirection = 1;
+        
+        // Color properties
+        this.baseColor = this.getRandomFishColor();
+        this.finColor = this.getLighterColor(this.baseColor, 30);
+        this.tailColor = this.getDarkerColor(this.baseColor, 20);
+    }
+
+    getRandomFishColor() {
+        const fishColors = [
+            '#FF6B6B',  // Coral red
+            '#4ECDC4',  // Turquoise
+            '#45B7D1',  // Ocean blue
+            '#96CEB4',  // Seafoam
+            '#FFEEAD',  // Pale yellow
+            '#FFD93D',  // Golden
+            '#6C5B7B'   // Purple
+        ];
+        return fishColors[Math.floor(Math.random() * fishColors.length)];
+    }
+
+    getLighterColor(color, percent) {
+        const num = parseInt(color.replace('#', ''), 16);
+        const amt = Math.round(2.55 * percent);
+        const R = Math.min(255, ((num >> 16) + amt));
+        const G = Math.min(255, (((num >> 8) & 0x00FF) + amt));
+        const B = Math.min(255, ((num & 0x0000FF) + amt));
+        return '#' + (0x1000000 + (R << 16) + (G << 8) + B).toString(16).slice(1);
+    }
+
+    getDarkerColor(color, percent) {
+        const num = parseInt(color.replace('#', ''), 16);
+        const amt = Math.round(2.55 * percent);
+        const R = Math.max(0, ((num >> 16) - amt));
+        const G = Math.max(0, (((num >> 8) & 0x00FF) - amt));
+        const B = Math.max(0, ((num & 0x0000FF) - amt));
+        return '#' + (0x1000000 + (R << 16) + (G << 8) + B).toString(16).slice(1);
     }
 
     move(keys) {
         let dx = 0;
         let dy = 0;
 
-        // Handle movement
         if (keys['ArrowLeft'] || keys['KeyA']) dx -= this.speed;
         if (keys['ArrowRight'] || keys['KeyD']) dx += this.speed;
         if (keys['ArrowUp'] || keys['KeyW']) dy -= this.speed;
@@ -41,211 +75,143 @@ class Player {
             this.facingRight = dx > 0;
         }
 
-        // Update animation state
-        this.isMoving = dx !== 0 || dy !== 0;
-        if (this.isMoving) {
-            this.tailAngle += this.tailSpeed;
-            this.finAngle += this.finSpeed;
-        } else {
-            // Gentle idle animation
-            this.tailAngle += this.tailSpeed * 0.5;
-            this.finAngle += this.finSpeed * 0.5;
-        }
-
-        // Keep within bounds
+        // Constrain to canvas
         this.x = Math.max(this.size/2, Math.min(1024 - this.size/2, this.x));
         this.y = Math.max(this.size/2, Math.min(768 - this.size/2, this.y));
+
+        // Animate tail and fins based on movement
+        const moving = dx !== 0 || dy !== 0;
+        const speedMultiplier = moving ? 1 : 0.5;
+
+        this.tailAngle += this.tailSpeed * speedMultiplier;
+        this.finAngle += this.finSpeed * speedMultiplier;
+
+        // Update scale glow effect
+        this.scaleGlow += 0.02 * this.glowDirection;
+        if (this.scaleGlow > 1 || this.scaleGlow < 0) {
+            this.glowDirection *= -1;
+        }
     }
 
     draw(ctx) {
         ctx.save();
         ctx.translate(this.x, this.y);
-        
-        // Flip if facing left
         if (!this.facingRight) {
             ctx.scale(-1, 1);
         }
 
-        // Draw fish body
-        this.drawFishBody(ctx);
+        // Draw body shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.beginPath();
+        ctx.ellipse(2, 2, this.size/2, this.size/3, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw tail
+        const tailWag = Math.sin(this.tailAngle) * this.size/4;
+        ctx.fillStyle = this.tailColor;
+        ctx.beginPath();
+        ctx.moveTo(-this.size/2, 0);
+        ctx.quadraticCurveTo(
+            -this.size * 0.8, tailWag,
+            -this.size, tailWag
+        );
+        ctx.quadraticCurveTo(
+            -this.size * 0.8, -tailWag,
+            -this.size/2, 0
+        );
+        ctx.fill();
+
+        // Draw body
+        const gradient = ctx.createLinearGradient(-this.size/2, -this.size/2, this.size/2, this.size/2);
+        gradient.addColorStop(0, this.baseColor);
+        gradient.addColorStop(1, this.getDarkerColor(this.baseColor, 20));
         
-        // Draw fins and tail with animation
-        this.drawFinsAndTail(ctx);
-        
-        // Draw eyes
-        this.drawEyes(ctx);
-        
-        // Draw gills
-        this.drawGills(ctx);
-        
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, this.size/2, this.size/3, 0, 0, Math.PI * 2);
+        ctx.fill();
+
         // Draw scales
-        this.drawScales(ctx);
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.1 + this.scaleGlow * 0.1})`;
+        for (let i = -2; i <= 2; i++) {
+            for (let j = -1; j <= 1; j++) {
+                const scaleX = i * this.size/5;
+                const scaleY = j * this.size/4;
+                const scaleSize = this.size/8;
+                
+                ctx.beginPath();
+                ctx.arc(scaleX, scaleY, scaleSize, 0, Math.PI);
+                ctx.fill();
+            }
+        }
+
+        // Draw dorsal fin
+        const dorsalWave = Math.sin(this.finAngle) * this.size/16;
+        ctx.fillStyle = this.finColor;
+        ctx.beginPath();
+        ctx.moveTo(-this.size/4, -this.size/3);
+        ctx.quadraticCurveTo(
+            0, -this.size/2 - dorsalWave,
+            this.size/4, -this.size/3
+        );
+        ctx.lineTo(-this.size/4, -this.size/3);
+        ctx.fill();
+
+        // Draw pectoral fin
+        const pectoralWave = Math.cos(this.finAngle) * this.size/8;
+        ctx.fillStyle = this.finColor;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(
+            this.size/4, this.size/3 + pectoralWave,
+            0, this.size/2
+        );
+        ctx.lineTo(0, 0);
+        ctx.fill();
+
+        // Draw eye
+        ctx.fillStyle = 'white';
+        ctx.beginPath();
+        ctx.arc(this.size/4, -this.size/8, this.size/8, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = 'black';
+        ctx.beginPath();
+        ctx.arc(this.size/4, -this.size/8, this.size/16, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw gills
+        ctx.strokeStyle = this.getDarkerColor(this.baseColor, 30);
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 3; i++) {
+            ctx.beginPath();
+            ctx.arc(
+                -this.size/4,
+                -this.size/6 + i * this.size/8,
+                this.size/8,
+                -Math.PI/2,
+                Math.PI/2
+            );
+            ctx.stroke();
+        }
 
         ctx.restore();
     }
 
-    drawFishBody(ctx) {
-        // Main body
-        ctx.beginPath();
-        ctx.fillStyle = this.color;
-        ctx.moveTo(-this.size/2, 0);
-        
-        // Top curve
-        ctx.bezierCurveTo(
-            -this.size/3, -this.size/3,
-            this.size/3, -this.size/3,
-            this.size/2, 0
-        );
-        
-        // Bottom curve
-        ctx.bezierCurveTo(
-            this.size/3, this.size/3,
-            -this.size/3, this.size/3,
-            -this.size/2, 0
-        );
-        
-        ctx.fill();
-        
-        // Body gradient
-        const gradient = ctx.createLinearGradient(-this.size/2, 0, this.size/2, 0);
-        gradient.addColorStop(0, this.color);
-        gradient.addColorStop(0.5, this.getLighterColor(this.color));
-        gradient.addColorStop(1, this.color);
-        ctx.fillStyle = gradient;
-        ctx.fill();
-    }
-
-    drawFinsAndTail(ctx) {
-        // Tail
-        ctx.beginPath();
-        ctx.fillStyle = this.color;
-        const tailWave = Math.sin(this.tailAngle) * (this.isMoving ? 0.3 : 0.15);
-        
-        ctx.moveTo(-this.size/2, 0);
-        ctx.quadraticCurveTo(
-            -this.size * 0.8, -this.size/3,
-            -this.size * 0.9, -this.size/2 + (tailWave * this.size)
-        );
-        ctx.quadraticCurveTo(
-            -this.size * 0.7, 0,
-            -this.size * 0.9, this.size/2 + (tailWave * this.size)
-        );
-        ctx.quadraticCurveTo(
-            -this.size * 0.8, this.size/3,
-            -this.size/2, 0
-        );
-        ctx.fill();
-
-        // Top fin
-        ctx.beginPath();
-        const finWave = Math.sin(this.finAngle) * 0.1;
-        ctx.moveTo(0, -this.size/3);
-        ctx.quadraticCurveTo(
-            -this.size/6, -this.size/2 - finWave * this.size,
-            -this.size/3, -this.size/3
-        );
-        ctx.fill();
-
-        // Bottom fin
-        ctx.beginPath();
-        ctx.moveTo(-this.size/6, this.size/3);
-        ctx.quadraticCurveTo(
-            -this.size/4, this.size/2 + finWave * this.size,
-            -this.size/3, this.size/3
-        );
-        ctx.fill();
-
-        // Side fin
-        ctx.beginPath();
-        const sideFinWave = Math.cos(this.finAngle) * 0.1;
-        ctx.moveTo(0, 0);
-        ctx.quadraticCurveTo(
-            -this.size/4, this.size/4 + sideFinWave * this.size,
-            -this.size/3, this.size/3
-        );
-        ctx.fill();
-    }
-
-    drawEyes(ctx) {
-        // Eye white
-        ctx.beginPath();
-        ctx.fillStyle = 'white';
-        ctx.arc(this.size/4, -this.size/6, this.size/8, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Pupil
-        ctx.beginPath();
-        ctx.fillStyle = 'black';
-        ctx.arc(this.size/4 + this.size/16, -this.size/6, this.size/16, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Eye shine
-        ctx.beginPath();
-        ctx.fillStyle = 'white';
-        ctx.arc(this.size/4 + this.size/16, -this.size/6 - this.size/32, this.size/32, 0, Math.PI * 2);
-        ctx.fill();
-    }
-
-    drawGills(ctx) {
-        ctx.strokeStyle = this.getDarkerColor(this.color);
-        ctx.lineWidth = 2;
-        
-        // Draw three gill lines
-        for (let i = 0; i < 3; i++) {
-            ctx.beginPath();
-            ctx.moveTo(-this.size/6 + (i * this.size/12), -this.size/4);
-            ctx.quadraticCurveTo(
-                -this.size/6 + (i * this.size/12) - this.size/12,
-                0,
-                -this.size/6 + (i * this.size/12),
-                this.size/4
-            );
-            ctx.stroke();
-        }
-    }
-
-    drawScales(ctx) {
-        ctx.strokeStyle = this.getDarkerColor(this.color);
-        ctx.lineWidth = 1;
-        
-        // Draw scale pattern
-        for (let row = 0; row < 3; row++) {
-            for (let col = 0; col < 4; col++) {
-                ctx.beginPath();
-                const x = -this.size/3 + (col * this.size/6);
-                const y = -this.size/4 + (row * this.size/6);
-                ctx.arc(x, y, this.size/12, 0, Math.PI);
-                ctx.stroke();
-            }
-        }
-    }
-
-    getLighterColor(color) {
-        const r = parseInt(color.substr(1,2), 16);
-        const g = parseInt(color.substr(3,2), 16);
-        const b = parseInt(color.substr(5,2), 16);
-        
-        return `rgba(${r + 40}, ${g + 40}, ${b + 40}, 0.8)`;
-    }
-
-    getDarkerColor(color) {
-        const r = parseInt(color.substr(1,2), 16);
-        const g = parseInt(color.substr(3,2), 16);
-        const b = parseInt(color.substr(5,2), 16);
-        
-        return `rgb(${Math.max(0, r - 40)}, ${Math.max(0, g - 40)}, ${Math.max(0, b - 40)})`;
-    }
-
     grow() {
-        this.size += 5;
+        this.size += 2;
+        // Update colors slightly for variety
+        this.baseColor = this.getLighterColor(this.baseColor, 5);
+        this.finColor = this.getLighterColor(this.baseColor, 30);
+        this.tailColor = this.getDarkerColor(this.baseColor, 20);
     }
 
     canEat(otherSize) {
-        return this.size > otherSize * 1.2;
+        return this.size >= otherSize * 1.2;
     }
 
     canBeEaten(otherSize) {
-        return otherSize > this.size * 1.2;
+        return otherSize >= this.size * 1.2;
     }
 
     getBounds() {
