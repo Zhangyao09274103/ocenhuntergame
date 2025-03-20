@@ -2,30 +2,66 @@ class Game {
     constructor() {
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas.getContext('2d');
-        this.gameState = 'menu'; // menu, playing, gameOver
+        this.gameState = 'loading'; // loading, menu, playing, paused, gameOver
         this.score = 0;
         this.level = 1;
         this.keys = {};
         
-        // Initialize game objects
-        this.player = new Player(this.canvas.width/2, this.canvas.height/2, this.level);
-        this.creatureManager = new CreatureManager();
-        this.particleSystem = new ParticleSystem();
+        // Initialize managers
         this.soundManager = new SoundManager();
+        this.achievementManager = new AchievementManager(this);
         
-        // Initialize creatures for level 1
-        this.creatureManager.spawnCreatures(this.level);
+        // Setup loading screen
+        this.loadingProgress = 0;
+        this.assetsToLoad = ['sounds', 'images'];
+        this.loadedAssets = 0;
         
-        // Background elements
-        this.bubbles = [];
-        this.seaweed = this.createSeaweed();
+        // Load assets
+        this.loadAssets().then(() => {
+            // Initialize game objects
+            this.player = new Player(this.canvas.width/2, this.canvas.height/2, this.level);
+            this.creatureManager = new CreatureManager();
+            this.particleSystem = new ParticleSystem();
+            
+            // Initialize creatures for level 1
+            this.creatureManager.spawnCreatures(this.level);
+            
+            // Background elements
+            this.bubbles = [];
+            this.seaweed = this.createSeaweed();
+            
+            // Setup event listeners
+            this.setupEventListeners();
+            
+            // Start the game loop
+            this.lastTime = 0;
+            this.deltaTime = 0;
+            this.gameState = 'menu';
+            requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
+        });
+    }
+    
+    async loadAssets() {
+        const updateProgress = () => {
+            this.loadedAssets++;
+            this.loadingProgress = (this.loadedAssets / this.assetsToLoad.length) * 100;
+            document.querySelector('.loading-progress').style.width = this.loadingProgress + '%';
+        };
+
+        // Show loading screen
+        document.getElementById('loadingScreen').style.display = 'flex';
         
-        // Setup event listeners
-        this.setupEventListeners();
+        // Load sounds
+        await this.soundManager.loadSounds();
+        updateProgress();
         
-        // Start the game loop
-        this.lastTime = 0;
-        requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
+        // Load images (you would implement this based on your image loading system)
+        // For now, we'll simulate image loading
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        updateProgress();
+        
+        // Hide loading screen
+        document.getElementById('loadingScreen').style.display = 'none';
     }
     
     createSeaweed() {
@@ -56,6 +92,10 @@ class Game {
                 }
             } else if (e.code === 'KeyM') {
                 this.soundManager.toggleMute();
+                document.getElementById('muteButton').textContent = 
+                    this.soundManager.isMuted ? '🔇' : '🔊';
+            } else if (e.code === 'KeyP') {
+                this.togglePause();
             }
         });
         
@@ -63,23 +103,32 @@ class Game {
             this.keys[e.code] = false;
         });
 
-        // Add mute button
-        const muteButton = document.createElement('button');
-        muteButton.textContent = '🔊';
-        muteButton.style.position = 'absolute';
-        muteButton.style.top = '10px';
-        muteButton.style.right = '10px';
-        muteButton.style.padding = '10px';
-        muteButton.style.background = 'rgba(255, 255, 255, 0.2)';
-        muteButton.style.border = 'none';
-        muteButton.style.borderRadius = '5px';
-        muteButton.style.color = 'white';
-        muteButton.style.cursor = 'pointer';
-        muteButton.onclick = () => {
+        // Button controls
+        document.getElementById('muteButton').onclick = () => {
             this.soundManager.toggleMute();
-            muteButton.textContent = this.soundManager.isMuted ? '🔇' : '🔊';
+            document.getElementById('muteButton').textContent = 
+                this.soundManager.isMuted ? '🔇' : '🔊';
         };
-        document.getElementById('gameContainer').appendChild(muteButton);
+
+        document.getElementById('statsButton').onclick = () => {
+            const statsPanel = document.getElementById('statsPanel');
+            statsPanel.style.display = 
+                statsPanel.style.display === 'none' ? 'block' : 'none';
+        };
+
+        document.getElementById('pauseButton').onclick = () => {
+            this.togglePause();
+        };
+    }
+    
+    togglePause() {
+        if (this.gameState === 'playing') {
+            this.gameState = 'paused';
+            document.getElementById('pauseButton').textContent = '▶️';
+        } else if (this.gameState === 'paused') {
+            this.gameState = 'playing';
+            document.getElementById('pauseButton').textContent = '⏸️';
+        }
     }
     
     startGame() {
@@ -92,8 +141,20 @@ class Game {
     resetGame() {
         this.score = 0;
         this.level = 1;
-        this.player = new Player(this.canvas.width/2, this.canvas.height/2, this.level);
-        this.creatureManager.spawnCreatures(this.level);
+        this.player = new Player(this.canvas.width/2, this.canvas.height/2, 1);
+        this.player.speed = 5; // Reset speed to initial value
+        
+        // Clear and reinitialize creatures
+        this.creatureManager.prey = [];
+        this.creatureManager.predators = [];
+        
+        // Add initial creatures
+        for (let i = 0; i < 5; i++) {
+            this.addNewCreatures();
+        }
+        this.addNewPredator();
+        
+        this.achievementManager.reset();
         this.gameState = 'playing';
         document.getElementById('gameOverMenu').style.display = 'none';
         document.getElementById('tutorial').style.display = 'block';
@@ -102,6 +163,7 @@ class Game {
     
     gameOver() {
         this.gameState = 'gameOver';
+        this.achievementManager.updateHighScore();
         document.getElementById('finalScore').textContent = this.score;
         document.getElementById('gameOverMenu').style.display = 'block';
         document.getElementById('tutorial').style.display = 'none';
@@ -118,7 +180,13 @@ class Game {
                     this.player.grow();
                     this.particleSystem.addEatEffect(prey.x, prey.y, '#FFFF00');
                     this.soundManager.playSound('eat', 0.4);
+                    this.achievementManager.onCreatureEaten();
                     this.creatureManager.prey.splice(i, 1);
+
+                    // Add new creatures as player grows
+                    if (this.creatureManager.prey.length < 5) {
+                        this.addNewCreatures();
+                    }
                 }
             }
         }
@@ -135,20 +203,18 @@ class Game {
                     this.player.grow();
                     this.particleSystem.addEatEffect(predator.x, predator.y, '#FF0000');
                     this.soundManager.playSound('eat', 0.6);
+                    this.achievementManager.onCreatureEaten();
                     this.creatureManager.predators.splice(i, 1);
+
+                    // Add new predator when one is eaten
+                    this.addNewPredator();
                 }
             }
         }
         
-        // Check for level completion
-        if (this.creatureManager.prey.length === 0) {
-            if (this.level < 4) {
-                this.level++;
-                this.player = new Player(this.canvas.width/2, this.canvas.height/2, this.level);
-                this.creatureManager.spawnCreatures(this.level);
-                this.particleSystem.addLevelUpEffect(this.canvas.width/2, this.canvas.height/2);
-                this.soundManager.playSound('levelUp', 0.5);
-            }
+        // Check for progression
+        if (this.score >= this.level * 100) {
+            this.levelUp();
         }
     }
     
@@ -175,6 +241,9 @@ class Game {
                 plant.phase += plant.speed;
             });
             
+            // Update achievements and stats
+            this.achievementManager.update(deltaTime);
+            
             // Check collisions
             this.checkCollisions();
             
@@ -182,7 +251,7 @@ class Game {
             if (Math.random() < 0.05) {
                 const x = Math.random() * this.canvas.width;
                 this.particleSystem.addBubbleEffect(x, this.canvas.height);
-                if (Math.random() < 0.2) { // 20% chance to play bubble sound
+                if (Math.random() < 0.2) {
                     this.soundManager.playSound('bubble', 0.1);
                 }
             }
@@ -254,6 +323,18 @@ class Game {
         this.player.draw(this.ctx);
         this.particleSystem.draw(this.ctx);
         
+        // Draw pause overlay
+        if (this.gameState === 'paused') {
+            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            this.ctx.fillStyle = 'white';
+            this.ctx.font = '48px Arial';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText('PAUSED', this.canvas.width/2, this.canvas.height/2);
+            this.ctx.font = '24px Arial';
+            this.ctx.fillText('Press P to resume', this.canvas.width/2, this.canvas.height/2 + 40);
+        }
+        
         // Show appropriate menu
         if (this.gameState === 'menu') {
             document.getElementById('startMenu').style.display = 'block';
@@ -262,15 +343,73 @@ class Game {
     
     gameLoop(currentTime) {
         // Calculate delta time
-        const deltaTime = currentTime - this.lastTime;
+        this.deltaTime = currentTime - this.lastTime;
         this.lastTime = currentTime;
         
         // Update and draw
-        this.update(deltaTime);
+        if (this.gameState !== 'paused') {
+            this.update(this.deltaTime);
+        }
         this.draw();
         
         // Continue game loop
         requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
+    }
+
+    addNewCreatures() {
+        const minSize = Math.max(10, this.player.size * 0.5);
+        const maxSize = this.player.size * 0.9;
+        
+        // Add 2-3 new prey
+        const newPreyCount = 2 + Math.floor(Math.random() * 2);
+        for (let i = 0; i < newPreyCount; i++) {
+            const size = minSize + Math.random() * (maxSize - minSize);
+            const position = this.creatureManager.getRandomPosition(false, 200, this.player.x, this.player.y);
+            this.creatureManager.prey.push(new Creature(
+                position.x,
+                position.y,
+                size,
+                2 + Math.random() * 2,
+                '#88FF88',
+                false
+            ));
+        }
+    }
+
+    addNewPredator() {
+        const minSize = this.player.size * 1.3;
+        const maxSize = this.player.size * 1.8;
+        const size = minSize + Math.random() * (maxSize - minSize);
+        const position = this.creatureManager.getRandomPosition(true, 300, this.player.x, this.player.y);
+        
+        this.creatureManager.predators.push(new Creature(
+            position.x,
+            position.y,
+            size,
+            1.5 + Math.random() * 2,
+            '#FF8888',
+            true
+        ));
+    }
+
+    levelUp() {
+        this.level++;
+        this.particleSystem.addLevelUpEffect(this.player.x, this.player.y);
+        this.soundManager.playSound('levelUp', 0.5);
+        
+        // Increase player stats slightly
+        this.player.speed += 0.2;
+        
+        // Add new creatures for variety
+        this.addNewCreatures();
+        
+        // Add a new predator every few levels
+        if (this.level % 2 === 0) {
+            this.addNewPredator();
+        }
+        
+        // Update UI
+        document.getElementById('levelDisplay').textContent = this.level;
     }
 }
 

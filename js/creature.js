@@ -117,73 +117,182 @@ class CreatureManager {
     constructor() {
         this.prey = [];
         this.predators = [];
+        this.canvas = document.getElementById('gameCanvas');
     }
 
     spawnCreatures(level) {
         this.prey = [];
         this.predators = [];
+        
+        const safeRadius = 200; // Safe zone around player
+        const centerX = this.canvas.width / 2;
+        const centerY = this.canvas.height / 2;
 
-        if (level === 1) {  // Small Fish World
-            // Spawn plankton (tiny prey)
-            for (let i = 0; i < 15; i++) {
-                this.spawnPrey(10, 2, '#00FF00');
-            }
-            // Spawn small fish (prey)
-            for (let i = 0; i < 10; i++) {
-                this.spawnPrey(15, 3, '#00FFFF');
-            }
-            // Spawn medium fish (predators)
-            for (let i = 0; i < 5; i++) {
-                this.spawnPredator(40, 4, '#FF0000');
-            }
-        } else if (level === 2) {  // Crab's Domain
-            // Spawn small fish and shrimp
-            for (let i = 0; i < 12; i++) {
-                this.spawnPrey(20, 3, '#FFC0CB');
-            }
-            // Spawn octopus and large crabs
-            for (let i = 0; i < 6; i++) {
-                this.spawnPredator(45, 3.5, '#800080');
-            }
-        } else if (level === 3) {  // Sea Snake Adventure
-            // Spawn medium fish
-            for (let i = 0; i < 8; i++) {
-                this.spawnPrey(25, 4, '#FFD700');
-            }
-            // Spawn sharks and moray eels
-            for (let i = 0; i < 4; i++) {
-                this.spawnPredator(50, 4.5, '#8B4513');
-            }
-        } else if (level === 4) {  // Shark Territory
-            // Spawn large fish and sea snakes
-            for (let i = 0; i < 6; i++) {
-                this.spawnPrey(30, 4.5, '#4682B4');
-            }
-            // Spawn killer whales
-            for (let i = 0; i < 3; i++) {
-                this.spawnPredator(60, 5, '#000000');
-            }
+        // Spawn prey
+        const preyCount = 5 + level * 2;
+        for (let i = 0; i < preyCount; i++) {
+            const size = 20 + Math.random() * 10;
+            const position = this.getRandomPosition(false, safeRadius, centerX, centerY);
+            this.prey.push(new Creature(
+                position.x,
+                position.y,
+                size,
+                '#88FF88'
+            ));
+        }
+
+        // Spawn predators
+        const predatorCount = 2 + level;
+        for (let i = 0; i < predatorCount; i++) {
+            const size = 50 + level * 10 + Math.random() * 20;
+            const position = this.getRandomPosition(true, safeRadius, centerX, centerY);
+            this.predators.push(new Creature(
+                position.x,
+                position.y,
+                size,
+                '#FF8888'
+            ));
         }
     }
 
-    spawnPrey(size, speed, color) {
-        const x = Math.random() * 1024;
-        const y = Math.random() * 768;
-        this.prey.push(new Creature(x, y, size, speed, color, false));
+    getRandomPosition(isPredator, safeRadius, playerX, playerY) {
+        let x, y;
+        let isValidPosition = false;
+        let attempts = 0;
+        const maxAttempts = 50;
+
+        while (!isValidPosition && attempts < maxAttempts) {
+            if (isPredator) {
+                // For predators, ensure they spawn far from the player
+                const angle = Math.random() * Math.PI * 2;
+                const minDistance = safeRadius * 1.5; // Minimum distance for predators
+                const maxDistance = Math.min(this.canvas.width, this.canvas.height) * 0.4; // Maximum distance
+                const distance = minDistance + Math.random() * (maxDistance - minDistance);
+                
+                x = playerX + Math.cos(angle) * distance;
+                y = playerY + Math.sin(angle) * distance;
+            } else {
+                // For prey, spawn anywhere but maintain some minimum distance between creatures
+                x = Math.random() * this.canvas.width;
+                y = Math.random() * this.canvas.height;
+            }
+
+            // Keep creatures within canvas bounds with padding
+            const padding = 50;
+            x = Math.max(padding, Math.min(this.canvas.width - padding, x));
+            y = Math.max(padding, Math.min(this.canvas.height - padding, y));
+
+            // Check distance from player
+            const distToPlayer = Math.sqrt(
+                Math.pow(x - playerX, 2) + 
+                Math.pow(y - playerY, 2)
+            );
+
+            if (isPredator) {
+                isValidPosition = distToPlayer >= safeRadius * 1.5;
+            } else {
+                isValidPosition = distToPlayer >= 100; // Smaller safe radius for prey
+            }
+
+            // Check distance from other creatures
+            const minCreatureDistance = 50;
+            isValidPosition = isValidPosition && this.checkCreatureDistance(x, y, minCreatureDistance);
+
+            attempts++;
+        }
+
+        // If we couldn't find a valid position, use the last attempted position
+        return { x, y };
     }
 
-    spawnPredator(size, speed, color) {
-        const x = Math.random() * 1024;
-        const y = Math.random() * 768;
-        this.predators.push(new Creature(x, y, size, speed, color, true));
+    checkCreatureDistance(x, y, minDistance) {
+        // Check distance from other prey
+        for (const prey of this.prey) {
+            const dist = Math.sqrt(
+                Math.pow(x - prey.x, 2) + 
+                Math.pow(y - prey.y, 2)
+            );
+            if (dist < minDistance) return false;
+        }
+
+        // Check distance from predators
+        for (const predator of this.predators) {
+            const dist = Math.sqrt(
+                Math.pow(x - predator.x, 2) + 
+                Math.pow(y - predator.y, 2)
+            );
+            if (dist < minDistance) return false;
+        }
+
+        return true;
     }
 
-    update(playerPos) {
-        this.prey.forEach(creature => creature.update());
-        this.predators.forEach(creature => creature.update(playerPos));
+    update(playerPosition) {
+        // Update prey movement
+        this.prey.forEach(prey => {
+            // Move away from player if too close
+            const distToPlayer = Math.sqrt(
+                Math.pow(prey.x - playerPosition.x, 2) + 
+                Math.pow(prey.y - playerPosition.y, 2)
+            );
+            
+            if (distToPlayer < 150) {
+                // Calculate angle away from player
+                const angle = Math.atan2(
+                    prey.y - playerPosition.y,
+                    prey.x - playerPosition.x
+                );
+                
+                // Move away faster when player is closer
+                const speed = (1 - distToPlayer / 150) * 3;
+                prey.x += Math.cos(angle) * speed;
+                prey.y += Math.sin(angle) * speed;
+            }
+            
+            // Random movement
+            prey.x += (Math.random() - 0.5) * 2;
+            prey.y += (Math.random() - 0.5) * 2;
+            
+            // Keep within bounds
+            prey.x = Math.max(0, Math.min(this.canvas.width, prey.x));
+            prey.y = Math.max(0, Math.min(this.canvas.height, prey.y));
+        });
+
+        // Update predator movement
+        this.predators.forEach(predator => {
+            const distToPlayer = Math.sqrt(
+                Math.pow(predator.x - playerPosition.x, 2) + 
+                Math.pow(predator.y - playerPosition.y, 2)
+            );
+            
+            // Only chase if within certain range
+            if (distToPlayer < 300) {
+                // Calculate angle to player
+                const angle = Math.atan2(
+                    playerPosition.y - predator.y,
+                    playerPosition.x - predator.x
+                );
+                
+                // Move towards player, faster when closer
+                const speed = (1 - distToPlayer / 300) * 2;
+                predator.x += Math.cos(angle) * speed;
+                predator.y += Math.sin(angle) * speed;
+            } else {
+                // Random movement when not chasing
+                predator.x += (Math.random() - 0.5);
+                predator.y += (Math.random() - 0.5);
+            }
+            
+            // Keep within bounds
+            predator.x = Math.max(0, Math.min(this.canvas.width, predator.x));
+            predator.y = Math.max(0, Math.min(this.canvas.height, predator.y));
+        });
     }
 
     draw(ctx) {
-        [...this.prey, ...this.predators].forEach(creature => creature.draw(ctx));
+        // Draw all creatures
+        [...this.prey, ...this.predators].forEach(creature => {
+            creature.draw(ctx);
+        });
     }
 } 
